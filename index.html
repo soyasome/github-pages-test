@@ -3,68 +3,202 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub Pages カメラサンプル</title>
+    <title>OpenCV.js リアルタイムカメラ処理</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             text-align: center;
             padding: 20px;
-            background-color: #f0f0f0;
+            background-color: #f5f5f5;
         }
-        video {
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        /* 映像を表示するキャンバス */
+        canvas {
             width: 100%;
             max-width: 500px;
             border: 3px solid #333;
             border-radius: 8px;
             background-color: #000;
         }
+        /* 元のビデオ（非表示にして処理の入力元として使う） */
+        video {
+            display: none;
+        }
+        .status {
+            font-weight: bold;
+            color: #d9534f;
+            margin-bottom: 15px;
+        }
+        .status.ready {
+            color: #5cb85c;
+        }
+        .btn-group {
+            margin-bottom: 15px;
+        }
         button {
-            padding: 10px 20px;
-            font-size: 16px;
+            padding: 10px 15px;
+            font-size: 14px;
+            margin: 5px;
+            background-color: #e7e7e7;
+            color: black;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button.active {
             background-color: #007bff;
             color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-bottom: 20px;
+            border-color: #0056b3;
         }
-        button:hover {
-            background-color: #0056b3;
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
     </style>
 </head>
 <body>
 
-    <h1>GitHub Pages カメラサンプル</h1>
-    <button id="start-camera">カメラを起動</button>
+<div class="container">
+    <h1>OpenCV.js カメラ処理</h1>
+    
+    <div id="status" class="status">OpenCV.js を読み込み中...</div>
+    
+    <div class="btn-group">
+        <button id="btn-normal" class="active" disabled>ノーマル</button>
+        <button id="btn-gray" disabled>グレースケール</button>
+        <button id="btn-edge" disabled>エッジ検出</button>
+        <button id="btn-thresh" disabled>二値化</button>
+    </div>
+
+    <div>
+        <button id="start-camera" style="background-color: #28a745; color: white;" disabled>カメラを起動</button>
+    </div>
+
     <br>
-    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas-output"></canvas>
+    
+    <video id="video-input" width="640" height="480" autoplay playsinline></video>
+</div>
 
-    <script>
-        const startButton = document.getElementById('start-camera');
-        const video = document.getElementById('video');
+<script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
 
-        startButton.addEventListener('click', async () => {
-            try {
-                // カメラへのアクセスをリクエスト（背面カメラ優先、なければデフォルト）
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user" },
-                    audio: false
-                });
+<script>
+    const video = document.getElementById('video-input');
+    const canvas = document.getElementById('canvas-output');
+    const statusText = document.getElementById('status');
+    const startButton = document.getElementById('start-camera');
+    
+    const buttons = {
+        normal: document.getElementById('btn-normal'),
+        gray: document.getElementById('btn-gray'),
+        edge: document.getElementById('btn-edge'),
+        thresh: document.getElementById('btn-thresh')
+    };
 
-                const track = stream.getVideoTracks()[0];
-                console.log(track.getCapabilities()); // そのカメラができること一覧
-                console.log(track.getSettings());     // 今、適応されているリアルタイムの値
-                
-                // video要素にストリームをセット
-                video.srcObject = stream;
-                startButton.textContent = "カメラ起動中";
-                startButton.disabled = true;
-            } catch (err) {
-                console.error("カメラの起動に失敗しました: ", err);
-                alert("カメラのアクセスが拒否されたか、デバイスが見つかりません。");
-            }
+    let currentMode = 'normal'; // 現在の画像処理モード
+    let isStreaming = false;
+    let src, dst, cap; // OpenCVのオブジェクト用変数
+
+    // 1. OpenCV.js の読み込み完了コールバック
+    function onOpenCvReady() {
+        statusText.textContent = 'OpenCV.js 準備完了！カメラを起動してください。';
+        statusText.classList.add('ready');
+        startButton.disabled = false;
+    }
+
+    // scriptタグの「async」読み込みに対応するため、グローバルにバインド
+    window.onOpenCvReady = onOpenCvReady;
+    // すでに読み込まれていた場合のセーフティ
+    if (typeof cv !== 'undefined') { onOpenCvReady(); }
+
+    // 2. カメラの起動
+    startButton.addEventListener('click', async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480, facingMode: "user" },
+                audio: false
+            });
+            video.srcObject = stream;
+            video.play();
+            
+            startButton.style.display = 'none'; // 起動ボタンを隠す
+            enableModeButtons();                // 処理ボタンを有効化
+            isStreaming = true;
+            
+            // 映像がスタートしたらOpenCVのループを開始
+            video.addEventListener('canplay', startProcessing, { once: true });
+        } catch (err) {
+            console.error("カメラアクセスエラー:", err);
+            alert("カメラを起動できませんでした。");
+        }
+    });
+
+    // 3. 処理切り替えボタンのイベント登録
+    Object.keys(buttons).forEach(mode => {
+        buttons[mode].addEventListener('click', () => {
+            currentMode = mode;
+            // アクティブなボタンの見た目を変更
+            Object.values(buttons).forEach(btn => btn.classList.remove('active'));
+            buttons[mode].classList.add('active');
         });
-    </script>
+    });
+
+    function enableModeButtons() {
+        Object.values(buttons).forEach(btn => btn.disabled = false);
+    }
+
+    // 4. OpenCV.js を使ったリアルタイム画像処理ループ
+    function startProcessing() {
+        // OpenCVの行列（Mat）とキャプチャオブジェクトを初期化
+        src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
+        dst = new cv.Mat(video.height, video.width, cv.CV_8UC4);
+        cap = new cv.VideoCapture(video);
+
+        const FPS = 30;
+        function processVideo() {
+            if (!isStreaming) return;
+
+            try {
+                // 1フレームキャプチャして src に格納
+                cap.read(src);
+
+                // モードに応じて処理を分岐
+                if (currentMode === 'normal') {
+                    cv.imshow('canvas-output', src);
+                } 
+                else if (currentMode === 'gray') {
+                    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+                    cv.imshow('canvas-output', dst);
+                } 
+                else if (currentMode === 'edge') {
+                    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+                    // Cannyエッジ検出 (しきい値1: 50, しきい値2: 100)
+                    cv.Canny(dst, dst, 50, 100, 3, false);
+                    cv.imshow('canvas-output', dst);
+                } 
+                else if (currentMode === 'thresh') {
+                    cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+                    // 大津の二値化 (Otsu's Thresholding)
+                    cv.threshold(dst, dst, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+                    cv.imshow('canvas-output', dst);
+                }
+
+                // 次のフレームをスケジュール (約30fps)
+                setTimeout(processVideo, 1000 / FPS);
+            } catch (err) {
+                console.error("ループ内エラー:", err);
+                // エラーが起きた場合は安全のために少し待って再試行
+                setTimeout(processVideo, 1000);
+            }
+        }
+
+        // ループを開始
+        setTimeout(processVideo, 0);
+    }
+</script>
+
 </body>
 </html>
