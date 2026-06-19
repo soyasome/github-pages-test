@@ -51,6 +51,10 @@
                     video: { facingMode: "user" },
                     audio: false
                 });
+
+                const track = stream.getVideoTracks()[0];
+                console.log(track.getCapabilities()); // そのカメラができること一覧
+                console.log(track.getSettings());     // 今、適応されているリアルタイムの値
                 
                 // video要素にストリームをセット
                 video.srcObject = stream;
