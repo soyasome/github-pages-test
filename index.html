@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Pages カメラサンプル</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        video {
+            width: 100%;
+            max-width: 500px;
+            border: 3px solid #333;
+            border-radius: 8px;
+            background-color: #000;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>GitHub Pages カメラサンプル</h1>
+    <button id="start-camera">カメラを起動</button>
+    <br>
+    <video id="video" autoplay playsinline></video>
+
+    <script>
+        const startButton = document.getElementById('start-camera');
+        const video = document.getElementById('video');
+
+        startButton.addEventListener('click', async () => {
+            try {
+                // カメラへのアクセスをリクエスト（背面カメラ優先、なければデフォルト）
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user" },
+                    audio: false
+                });
+                
+                // video要素にストリームをセット
+                video.srcObject = stream;
+                startButton.textContent = "カメラ起動中";
+                startButton.disabled = true;
+            } catch (err) {
+                console.error("カメラの起動に失敗しました: ", err);
+                alert("カメラのアクセスが拒否されたか、デバイスが見つかりません。");
+            }
+        });
+    </script>
+</body>
+</html>
