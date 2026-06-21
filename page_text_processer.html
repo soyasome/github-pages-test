@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多機能テキスト処理ツール</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background-color: #f4f6f9;
+            color: #333;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        /* 上部：入出力エリア */
+        .io-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .io-box {
+            flex: 1;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+        }
+        .io-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .io-header label {
+            font-weight: bold;
+        }
+        textarea {
+            height: 250px;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            resize: vertical;
+            font-family: monospace;
+            font-size: 14px;
+            box-sizing: border-box;
+            width: 100%;
+        }
+        /* リアルタイム統計情報パネル */
+        .stats-panel {
+            background: #e9ecef;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #495057;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px 15px;
+            margin-bottom: 8px;
+        }
+        .stats-search {
+            border-top: 1px solid #ced4da;
+            padding-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stats-search input {
+            padding: 3px 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+            width: 120px;
+        }
+        /* 下部：処理ツールエリア */
+        .tools-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+        }
+        .tool-card {
+            background: white;
+            padding: 18px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .tool-card h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 15px;
+            border-left: 4px solid #007bff;
+            padding-left: 8px;
+        }
+        .input-group {
+            margin-bottom: 12px;
+        }
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 6px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .btn-secondary { background-color: #6c757d; }
+        .btn-secondary:hover { background-color: #5a6268; }
+        .inline-btns {
+            display: flex;
+            gap: 10px;
+        }
+        .copy-btn {
+            width: auto;
+            padding: 5px 12px;
+            font-size: 12px;
+            background-color: #28a745;
+        }
+        .copy-btn:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="io-container">
+        <div class="io-box">
+            <div class="io-header">
+                <label for="input-text">入力文章</label>
+            </div>
+            <textarea id="input-text" placeholder="ここに元の文章を入力してください..."></textarea>
+            
+            <div class="stats-panel">
+                <div class="stats-grid">
+                    <div>文字数(スペース込): <span id="char-count-all">0</span></div>
+                    <div>文字数(空白除く): <span id="char-count-pure">0</span></div>
+                    <div>行数(空行含む): <span id="line-count-all">0</span></div>
+                    <div>行数(空行除く): <span id="line-count-pure">0</span></div>
+                </div>
+                <div class="stats-search">
+                    <label for="stat-search">出現回数検索:</label>
+                    <input type="text" id="stat-search" placeholder="文字・単語を入力">
+                    <div>結果: <strong id="match-count" style="color: #007bff;">0</strong> 回</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="io-box">
+            <div class="io-header">
+                <label for="output-text">出力文章</label>
+                <button id="copy-btn" class="copy-btn" onclick="copyToClipboard()">コピー</button>
+            </div>
+            <textarea id="output-text" readonly placeholder="処理結果がここに表示されます..."></textarea>
+        </div>
+    </div>
+
+    <div class="tools-container">
+        <div class="tool-card">
+            <h3>各行への連番付与</h3>
+            <div class="input-group">
+                <label>開始番号</label>
+                <input type="number" id="seq-start" value="1">
+            </div>
+            <div class="input-group">
+                <label>ゼロ埋め桁数 (0か1で埋めなし)</label>
+                <input type="number" id="seq-digits" value="0" min="0" placeholder="例: 2">
+            </div>
+            <div class="input-group">
+                <label>記号（接尾辞）</label>
+                <input type="text" id="seq-suffix" value=". ">
+            </div>
+            <button onclick="addSequence()">連番を付与</button>
+        </div>
+
+        <div class="tool-card">
+            <h3>行の並び替え</h3>
+            <div class="input-group">
+                <label>並び替え順を選択</label>
+                <div class="inline-btns">
+                    <button onclick="sortLines(true)">昇順 (A-Z/あぃう)</button>
+                    <button onclick="sortLines(false)" class="btn-secondary">降順 (Z-A/わをん)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="tool-card">
+            <h3>文字列の置換</h3>
+            <div class="input-group">
+                <label>検索文字列</label>
+                <input type="text" id="rep-from" placeholder="例: りんご">
+            </div>
+            <div class="input-group">
+                <label>置換後文字列</label>
+                <input type="text" id="rep-to" placeholder="例: みかん">
+            </div>
+            <button onclick="replaceText()">置換を実行</button>
+        </div>
+
+        <div class="tool-card">
+            <h3>行の前後に付与</h3>
+            <div class="input-group">
+                <label>行頭に追加</label>
+                <input type="text" id="add-before" placeholder="例: ・">
+            </div>
+            <div class="input-group">
+                <label>行末に追加</label>
+                <input type="text" id="add-after" placeholder="例: ；">
+            </div>
+            <button onclick="addAffix()">付与を実行</button>
+        </div>
+
+        <div class="tool-card">
+            <h3>改行 → 文字列</h3>
+            <div class="input-group">
+                <label>置換後の文字列</label>
+                <input type="text" id="br-to-str" placeholder="例: 、">
+            </div>
+            <button onclick="convertBrToText()">変換を実行</button>
+        </div>
+
+        <div class="tool-card">
+            <h3>文字列 → 改行</h3>
+            <div class="input-group">
+                <label>改行にしたい文字列</label>
+                <input type="text" id="str-to-br" placeholder="例: 、">
+            </div>
+            <button onclick="convertTextToBr()">変換を実行</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const inputEl = document.getElementById('input-text');
+    const outputEl = document.getElementById('output-text');
+
+    // リアルタイム統計情報の更新
+    function updateStats() {
+        const text = inputEl.value;
+        
+        // 文字数（\s は半角・全角スペース、改行、タブなどを含む）
+        document.getElementById('char-count-all').textContent = text.length;
+        document.getElementById('char-count-pure').textContent = text.replace(/\s/g, '').length;
+        
+        // 行数
+        const lines = text ? text.split('\n') : [];
+        document.getElementById('line-count-all').textContent = lines.length;
+        document.getElementById('line-count-pure').textContent = lines.filter(line => line.trim() !== '').length;
+        
+        // 出現回数（検索文字列で分割した配列の要素数 - 1 でシンプルに算出）
+        const searchWord = document.getElementById('stat-search').value;
+        document.getElementById('match-count').textContent = (searchWord && text) ? text.split(searchWord).length - 1 : 0;
+    }
+
+    // 入力エリアと検索窓のイベント監視
+    inputEl.addEventListener('input', updateStats);
+    document.getElementById('stat-search').addEventListener('input', updateStats);
+
+    // ワンクリックコピー
+    function copyToClipboard() {
+        navigator.clipboard.writeText(outputEl.value);
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'コピー完了！';
+        setTimeout(() => btn.textContent = 'コピー', 1500);
+    }
+
+    // 連番付与
+    function addSequence() {
+        const start = parseInt(document.getElementById('seq-start').value) || 1;
+        const digits = parseInt(document.getElementById('seq-digits').value) || 0;
+        const suffix = document.getElementById('seq-suffix').value;
+        
+        const lines = inputEl.value.split('\n');
+        outputEl.value = lines.map((line, i) => {
+            const num = String(i + start).padStart(digits, '0');
+            return num + suffix + line;
+        }).join('\n');
+    }
+
+    // 行のソート
+    function sortLines(asc) {
+        const lines = inputEl.value.split('\n');
+        lines.sort();
+        if (!asc) lines.reverse();
+        outputEl.value = lines.join('\n');
+    }
+
+    // 置換
+    function replaceText() {
+        outputEl.value = inputEl.value.replaceAll(document.getElementById('rep-from').value, document.getElementById('rep-to').value);
+    }
+
+    // 前後文字列付与
+    function addAffix() {
+        const before = document.getElementById('add-before').value;
+        const after = document.getElementById('add-after').value;
+        outputEl.value = inputEl.value.split('\n').map(line => before + line + after).join('\n');
+    }
+
+    // 改行 → 文字列
+    function convertBrToText() {
+        outputEl.value = inputEl.value.replace(/\r?\n/g, document.getElementById('br-to-str').value);
+    }
+
+    // 文字列 → 改行
+    function convertTextToBr() {
+        const from = document.getElementById('str-to-br').value;
+        if (from) outputEl.value = inputEl.value.replaceAll(from, '\n');
+    }
+</script>
+
+</body>
+</html>
