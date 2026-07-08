@@ -69,6 +69,7 @@
     <div class="controls">
         <button id="btnStart" disabled>カメラ起動</button>
         <button id="btnOriginal" class="filter-btn active" data-filter="original" disabled>オリジナル</button>
+        <button id="btnBilateral" class="filter-btn" data-filter="bilateral" disabled>カートゥーン</button>
         <button id="btnGray" class="filter-btn" data-filter="gray" disabled>グレースケール</button>
         <button id="btnBinary" class="filter-btn" data-filter="binary" disabled>２値化</button>
         <button id="btnEdge" class="filter-btn" data-filter="edge" disabled>エッジ抽出 (Canny)</button>
@@ -87,7 +88,8 @@
     
     let streaming = false;
     let currentFilter = 'original';
-    let src, dst, gray;
+    // バイラテラル用に srcRGB, dstRGB を追加
+    let src, dst, gray, srcRGB, dstRGB;
     let cap;
 
     // OpenCV.jsのロード完了時に呼ばれる関数
@@ -134,10 +136,12 @@
             document.getElementById('status').textContent = 'カメラ停止中';
             document.querySelectorAll('.filter-btn').forEach(btn => btn.disabled = true);
             
-            // メモリの解放 (C++でのデストラクタの代わり)
+            // メモリの解放 (バイラテラル用Matも解放)
             if (src) src.delete();
             if (dst) dst.delete();
             if (gray) gray.delete();
+            if (srcRGB) srcRGB.delete();
+            if (dstRGB) dstRGB.delete();
         }
     });
 
@@ -154,10 +158,12 @@
 
     // 映像処理ループ
     function startVideoProcessing() {
-        // メモリの確保 (毎フレーム確保するとメモリリークするため、外側で1度だけ確保する)
+        // メモリの確保 (バイラテラル用に3チャンネル(UC3)のMatを追加)
         src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
         dst = new cv.Mat(video.height, video.width, cv.CV_8UC1);
         gray = new cv.Mat(video.height, video.width, cv.CV_8UC1);
+        srcRGB = new cv.Mat(video.height, video.width, cv.CV_8UC3);
+        dstRGB = new cv.Mat(video.height, video.width, cv.CV_8UC3);
         cap = new cv.VideoCapture(video);
 
         const FPS = 30;
@@ -171,6 +177,33 @@
                 cap.read(src);
 
                 switch (currentFilter) {
+                    case 'bilateral':
+                        cv.cvtColor(src, srcRGB, cv.COLOR_RGBA2RGB); // RGBA から RGB に変換                 
+
+                        let iterations = 3;
+                        let inMat = srcRGB;
+                        let outMat = dstRGB;
+                        for (let i = 0; i < iterations; i++) {                           
+                            cv.bilateralFilter(inMat, outMat, 9, 75, 100, cv.BORDER_DEFAULT);// 負荷を抑えるため直径 d=5、標準偏差=75                           
+                            // 次のループのために、今回の出力を次の入力に入れ替える（ピンポンバッファ処理）
+                            let temp = inMat;
+                            inMat = outMat;
+                            outMat = temp;
+                        }               
+
+                        // 輪郭描画
+                        cv.cvtColor(inMat, gray, cv.COLOR_RGB2GRAY);
+                        cv.Canny(gray, dst, 20, 60, 3, false);
+                        let M = cv.Mat.ones(2, 2, cv.CV_8U); // 2x2のマス目で太くする
+                        //cv.dilate(dst, dst, M);
+                        M.delete(); // 使い終わったらメモリ解放
+                        dstRGB.setTo(new cv.Scalar(0, 0, 0), dst);
+
+                        // 画面に出力（最後のループで入れ替わっているため、最新結果は inMat に入っています）
+                        cv.imshow('canvasOutput', inMat);
+                        
+                        break;
+
                     case 'gray':
                         cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
                         cv.imshow('canvasOutput', dst);
