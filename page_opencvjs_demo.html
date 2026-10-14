@@ -211,8 +211,15 @@
                     
                     case 'binary':
                         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                        // 閾値128で2値化
-                        cv.threshold(gray, dst, 128, 255, cv.THRESH_BINARY);
+                        cv.GaussianBlur(gray, gray, new cv.Size(3, 3), 0);   // 軽いノイズ除去
+                        //適応的しきい値２値化
+                        cv.adaptiveThreshold(
+                          gray, dst, 255,
+                          cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+                          cv.THRESH_BINARY,
+                          31,   // blockSize: 奇数、対象より大きく
+                          10    // C
+                        );
                         cv.imshow('canvasOutput', dst);
                         break;
 
