@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>センサー情報ビューア</title>
+    <style>
+        :root {
+            --bg: #f4f6f9;
+            --card: #ffffff;
+            --text: #333;
+            --sub: #6c757d;
+            --accent: #007bff;
+            --accent-hover: #0056b3;
+            --x: #e8590c;
+            --y: #2f9e44;
+            --z: #1c7ed6;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .container { max-width: 1100px; margin: 0 auto; }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 12px;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link:hover { text-decoration: underline; }
+        h1 { font-size: 1.4rem; margin: 0 0 12px; }
+        .top-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .note { font-size: 13px; color: var(--sub); }
+        .warning {
+            display: none;
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 18px;
+            font-size: 15px;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            background: var(--accent);
+            color: #fff;
+            cursor: pointer;
+        }
+        button:hover { background: var(--accent-hover); }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.small { padding: 6px 12px; font-size: 13px; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+        }
+        .card {
+            background: var(--card);
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            min-width: 0;
+        }
+        .card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            gap: 8px;
+        }
+        .card h2 {
+            font-size: 15px;
+            margin: 0;
+            border-left: 4px solid var(--accent);
+            padding-left: 8px;
+        }
+        .badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
+            background: #e9ecef;
+            color: #495057;
+        }
+        .badge.active { background: #d3f9d8; color: #2b8a3e; }
+        .badge.unsupported, .badge.nodata { background: #f1f3f5; color: #868e96; }
+        .badge.denied, .badge.error { background: #ffe3e3; color: #c92a2a; }
+
+        .values {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 12px;
+            font-size: 14px;
+        }
+        .values dt { color: var(--sub); }
+        .values dd {
+            margin: 0;
+            text-align: right;
+            font-family: monospace;
+            font-variant-numeric: tabular-nums;
+        }
+        .card-note { font-size: 12px; color: var(--sub); margin: 10px 0 0; }
+        .card-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .visual { display: flex; justify-content: center; margin: 4px 0 12px; }
+        canvas { display: block; max-width: 100%; }
+
+        /* 水準器 */
+        .level {
+            position: relative;
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            background: #e7f5ff;
+            border: 2px solid #a5d8ff;
+        }
+        .level::before, .level::after {
+            content: "";
+            position: absolute;
+            background: #a5d8ff;
+        }
+        .level::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+        .level::after { top: 50%; left: 0; right: 0; height: 1px; }
+        .level .ring {
+            position: absolute;
+            left: 50%; top: 50%;
+            width: 32px; height: 32px;
+            margin: -16px 0 0 -16px;
+            border-radius: 50%;
+            border: 1px dashed #74c0fc;
+        }
+        .level .bubble {
+            position: absolute;
+            left: 50%; top: 50%;
+            width: 24px; height: 24px;
+            margin: -12px 0 0 -12px;
+            border-radius: 50%;
+            background: rgba(28, 126, 214, 0.75);
+        }
+
+        /* コンパス */
+        .compass {
+            position: relative;
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            border: 2px solid #ced4da;
+            background: #f8f9fa;
+        }
+        .compass .dial { position: absolute; inset: 0; }
+        .compass .dial span {
+            position: absolute;
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--sub);
+        }
+        .compass .dial .n { top: 4px; left: 50%; transform: translateX(-50%); color: #e03131; }
+        .compass .dial .s { bottom: 4px; left: 50%; transform: translateX(-50%); }
+        .compass .dial .e { right: 6px; top: 50%; transform: translateY(-50%); }
+        .compass .dial .w { left: 6px; top: 50%; transform: translateY(-50%); }
+        .compass .pointer {
+            position: absolute;
+            left: 50%; top: 50%;
+            width: 0; height: 0;
+            margin-left: -8px;
+            margin-top: -50px;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 50px solid var(--accent);
+        }
+        .compass .center {
+            position: absolute;
+            left: 50%; top: 50%;
+            width: 10px; height: 10px;
+            margin: -5px 0 0 -5px;
+            border-radius: 50%;
+            background: #495057;
+        }
+
+        /* グラフ凡例 */
+        .legend { display: flex; gap: 12px; font-size: 12px; justify-content: center; margin-bottom: 8px; }
+        .legend span::before {
+            content: "";
+            display: inline-block;
+            width: 10px; height: 3px;
+            margin-right: 4px;
+            vertical-align: middle;
+            background: currentColor;
+        }
+        .legend .lx { color: var(--x); }
+        .legend .ly { color: var(--y); }
+        .legend .lz { color: var(--z); }
+
+        /* 音量メーター */
+        .meter {
+            position: relative;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .meter .fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #40c057, #fab005 75%, #fa5252);
+        }
+        .meter .peak {
+            position: absolute;
+            top: 0; bottom: 0;
+            width: 2px;
+            left: 0%;
+            background: #212529;
+        }
+
+        /* タッチエリア */
+        .touch-area {
+            position: relative;
+            height: 180px;
+            border: 2px dashed #ced4da;
+            border-radius: 6px;
+            background: #f8f9fa;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .touch-area .hint {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #adb5bd;
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .touch-dot {
+            position: absolute;
+            width: 44px; height: 44px;
+            margin: -22px 0 0 -22px;
+            border-radius: 50%;
+            background: rgba(0, 123, 255, 0.35);
+            border: 2px solid var(--accent);
+            pointer-events: none;
+        }
+        .touch-list {
+            font-family: monospace;
+            font-size: 12px;
+            min-height: 1.2em;
+            white-space: pre;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <a href="index.html" class="back-link">← トップへ戻る</a>
+    <h1>📱 センサー情報ビューア</h1>
+
+    <div id="secure-warning" class="warning">
+        このページは HTTPS で開かないとセンサー・位置情報・マイクが使えません。
+    </div>
+
+    <div class="top-bar">
+        <button id="btn-start">センサーを開始</button>
+        <span class="note">取得したデータはこの端末の中だけで使い、外部には送信しません。</span>
+    </div>
+
+    <div class="grid">
+        <!-- ① 傾き -->
+        <section class="card" id="card-orientation">
+            <div class="card-head"><h2>① 傾き</h2><span class="badge">未開始</span></div>
+            <div class="visual">
+                <div class="level"><div class="ring"></div><div class="bubble" id="bubble"></div></div>
+            </div>
+            <dl class="values">
+                <dt>alpha（Z軸回転）</dt><dd id="ori-alpha">—</dd>
+                <dt>beta（前後の傾き）</dt><dd id="ori-beta">—</dd>
+                <dt>gamma（左右の傾き）</dt><dd id="ori-gamma">—</dd>
+            </dl>
+        </section>
+
+        <!-- ② 方位 -->
+        <section class="card" id="card-compass">
+            <div class="card-head"><h2>② 方位</h2><span class="badge">未開始</span></div>
+            <div class="visual">
+                <div class="compass">
+                    <div class="dial" id="compass-dial">
+                        <span class="n">N</span><span class="e">E</span><span class="s">S</span><span class="w">W</span>
+                    </div>
+                    <div class="pointer"></div>
+                    <div class="center"></div>
+                </div>
+            </div>
+            <dl class="values">
+                <dt>方位角</dt><dd id="compass-deg">—</dd>
+                <dt>方角</dt><dd id="compass-dir">—</dd>
+            </dl>
+            <p class="card-note">端末を水平に持ち、画面上端が向いている方角を表示します。値が不安定なときは端末を8の字に動かすと補正されます。</p>
+        </section>
+
+        <!-- ③ 加速度 -->
+        <section class="card" id="card-motion">
+            <div class="card-head"><h2>③ 加速度</h2><span class="badge">未開始</span></div>
+            <div class="legend"><span class="lx">x</span><span class="ly">y</span><span class="lz">z</span></div>
+            <canvas id="accel-graph" height="140"></canvas>
+            <dl class="values" style="margin-top: 10px;">
+                <dt>x（重力込み）</dt><dd id="acc-x">—</dd>
+                <dt>y（重力込み）</dt><dd id="acc-y">—</dd>
+                <dt>z（重力込み）</dt><dd id="acc-z">—</dd>
+                <dt>大きさ（重力除く）</dt><dd id="acc-lin">—</dd>
+                <dt>シェイク回数</dt><dd id="shake-count">0</dd>
+            </dl>
+            <p class="card-note">グラフは直近10秒・±20 m/s² の範囲です。</p>
+        </section>
+
+        <!-- ④ 回転速度 -->
+        <section class="card" id="card-rotation">
+            <div class="card-head"><h2>④ 回転速度（ジャイロ）</h2><span class="badge">未開始</span></div>
+            <dl class="values">
+                <dt>alpha（Z軸）</dt><dd id="rot-alpha">—</dd>
+                <dt>beta（X軸）</dt><dd id="rot-beta">—</dd>
+                <dt>gamma（Y軸）</dt><dd id="rot-gamma">—</dd>
+            </dl>
+        </section>
+
+        <!-- ⑤ 位置情報 -->
+        <section class="card" id="card-geo">
+            <div class="card-head"><h2>⑤ 位置情報</h2><span class="badge">未開始</span></div>
+            <dl class="values">
+                <dt>緯度</dt><dd id="geo-lat">—</dd>
+                <dt>経度</dt><dd id="geo-lon">—</dd>
+                <dt>精度</dt><dd id="geo-acc">—</dd>
+                <dt>高度</dt><dd id="geo-alt">—</dd>
+                <dt>速度</dt><dd id="geo-speed">—</dd>
+                <dt>進行方向</dt><dd id="geo-heading">—</dd>
+                <dt>最終更新</dt><dd id="geo-time">—</dd>
+            </dl>
+            <div class="card-actions"><button class="small" id="btn-geo">取得開始</button></div>
+        </section>
+
+        <!-- ⑥ マイク音量 -->
+        <section class="card" id="card-mic">
+            <div class="card-head"><h2>⑥ マイク音量</h2><span class="badge">未開始</span></div>
+            <div class="meter"><div class="fill" id="mic-fill"></div><div class="peak" id="mic-peak"></div></div>
+            <dl class="values">
+                <dt>現在</dt><dd id="mic-level">—</dd>
+                <dt>ピーク</dt><dd id="mic-peak-val">—</dd>
+            </dl>
+            <div class="card-actions"><button class="small" id="btn-mic">開始</button></div>
+            <p class="card-note">dBFS はマイク入力の相対レベル（0 が最大）で、騒音計の dB(SPL) とは異なります。</p>
+        </section>
+
+        <!-- ⑦ タッチ -->
+        <section class="card" id="card-touch">
+            <div class="card-head"><h2>⑦ タッチ</h2><span class="badge">未開始</span></div>
+            <div class="touch-area" id="touch-area"><div class="hint">ここを指で触ってください</div></div>
+            <dl class="values">
+                <dt>同時タッチ数</dt><dd id="touch-count">0</dd>
+                <dt>最大同時タッチ数</dt><dd id="touch-max">0</dd>
+            </dl>
+            <div class="touch-list" id="touch-list"></div>
+        </section>
+
+        <!-- ⑧ 端末情報 -->
+        <section class="card" id="card-device">
+            <div class="card-head"><h2>⑧ 端末情報</h2><span class="badge">未開始</span></div>
+            <dl class="values">
+                <dt>画面の向き</dt><dd id="dev-orient">—</dd>
+                <dt>画面サイズ</dt><dd id="dev-screen">—</dd>
+                <dt>表示領域</dt><dd id="dev-viewport">—</dd>
+                <dt>ピクセル比</dt><dd id="dev-dpr">—</dd>
+                <dt>バッテリー残量</dt><dd id="dev-battery">—</dd>
+                <dt>充電</dt><dd id="dev-charging">—</dd>
+                <dt>通信の種類</dt><dd id="dev-net-type">—</dd>
+                <dt>通信速度の目安</dt><dd id="dev-net-down">—</dd>
+                <dt>オンライン</dt><dd id="dev-online">—</dd>
+            </dl>
+        </section>
+
+        <!-- ⑨ バイブ -->
+        <section class="card" id="card-vibrate">
+            <div class="card-head"><h2>⑨ バイブ</h2><span class="badge">未開始</span></div>
+            <div class="card-actions">
+                <button class="small" id="btn-vib-short">200ms 振動</button>
+                <button class="small" id="btn-vib-pattern">パターン振動</button>
+            </div>
+            <p class="card-note">Android の Chrome などで動作します。iPhone では使えません。</p>
+        </section>
+    </div>
+</div>
+
+<script>
+(() => {
+    'use strict';
+
+    const $ = (id) => document.getElementById(id);
+    const NO_DATA_TIMEOUT = 3000;      // 開始後この時間イベントが来なければ「データなし」
+    const GRAPH_SECONDS = 10;          // グラフに表示する秒数
+    const GRAPH_RANGE = 20;            // グラフの縦軸 ±m/s²
+    const SHAKE_THRESHOLD = 15;        // シェイク判定（重力を除いた加速度 m/s²）
+    const SHAKE_COOLDOWN = 500;        // シェイクの連続カウント防止 (ms)
+
+    // ---------- 状態バッジ ----------
+    const STATUS_LABEL = {
+        idle: '未開始', active: '動作中', unsupported: '非対応',
+        denied: '許可されませんでした', nodata: 'データなし', error: 'エラー'
+    };
+    function setStatus(cardId, state, label) {
+        const badge = document.querySelector('#' + cardId + ' .badge');
+        badge.className = 'badge ' + state;
+        badge.textContent = label || STATUS_LABEL[state];
+    }
+
+    // ---------- 書式 ----------
+    const fmt = (v, digits, unit) =>
+        (v === null || v === undefined || Number.isNaN(v)) ? '—' : v.toFixed(digits) + (unit ? ' ' + unit : '');
+    const DIRS = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+    const dirName = (deg) => DIRS[Math.round(deg / 45) % 8];
+
+    if (!window.isSecureContext) $('secure-warning').style.display = 'block';
+
+    // ---------- センサーの最新値（イベントでは保存のみ、描画は rAF） ----------
+    const latest = {
+        orientation: null,     // {alpha, beta, gamma}
+        heading: null,         // 0-360
+        accelG: null,          // {x, y, z} 重力込み
+        accelLin: null,        // 重力除く大きさ
+        rotation: null,        // {alpha, beta, gamma}
+        dirty: false
+    };
+    const received = { orientation: false, compass: false, motion: false, rotation: false };
+    let shakeCount = 0;
+    let lastShake = 0;
+
+    // 加速度グラフ用リングバッファ
+    const graphBuf = [];   // {t, x, y, z}
+
+    function onOrientation(e) {
+        if (e.alpha === null && e.beta === null && e.gamma === null) return;
+        latest.orientation = { alpha: e.alpha, beta: e.beta, gamma: e.gamma };
+        received.orientation = true;
+        // iPhone: webkitCompassHeading が方位
+        if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
+            latest.heading = e.webkitCompassHeading;
+            received.compass = true;
+        }
+        latest.dirty = true;
+    }
+
+    function onOrientationAbsolute(e) {
+        // Android: 絶対方位。alpha は反時計回りなので方位角に変換
+        if (e.alpha === null) return;
+        latest.heading = (360 - e.alpha) % 360;
+        received.compass = true;
+        latest.dirty = true;
+    }
+
+    function onMotion(e) {
+        const g = e.accelerationIncludingGravity;
+        if (g && g.x !== null) {
+            latest.accelG = { x: g.x, y: g.y, z: g.z };
+            received.motion = true;
+            graphBuf.push({ t: performance.now(), x: g.x, y: g.y, z: g.z });
+        }
+        const a = e.acceleration;
+        if (a && a.x !== null) {
+            const mag = Math.hypot(a.x, a.y, a.z);
+            latest.accelLin = mag;
+            const now = performance.now();
+            if (mag > SHAKE_THRESHOLD && now - lastShake > SHAKE_COOLDOWN) {
+                shakeCount++;
+                lastShake = now;
+            }
+        }
+        const r = e.rotationRate;
+        if (r && (r.alpha !== null || r.beta !== null || r.gamma !== null)) {
+            latest.rotation = { alpha: r.alpha, beta: r.beta, gamma: r.gamma };
+            received.rotation = true;
+        }
+        latest.dirty = true;
+    }
+
+    // ---------- センサー開始（①〜④） ----------
+    const hasOrientation = 'DeviceOrientationEvent' in window;
+    const hasMotion = 'DeviceMotionEvent' in window;
+    if (!hasOrientation) { setStatus('card-orientation', 'unsupported'); setStatus('card-compass', 'unsupported'); }
+    if (!hasMotion) { setStatus('card-motion', 'unsupported'); setStatus('card-rotation', 'unsupported'); }
+
+    $('btn-start').addEventListener('click', () => {
+        const btn = $('btn-start');
+        btn.disabled = true;
+
+        // iPhone は requestPermission をタップ操作の中で同期的に呼ぶ必要がある
+        const reqs = [];
+        if (hasOrientation && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            reqs.push(DeviceOrientationEvent.requestPermission().then(s => ['orientation', s]));
+        }
+        if (hasMotion && typeof DeviceMotionEvent.requestPermission === 'function') {
+            reqs.push(DeviceMotionEvent.requestPermission().then(s => ['motion', s]));
+        }
+
+        Promise.all(reqs).then((results) => {
+            const denied = Object.fromEntries(results.map(([k, s]) => [k, s !== 'granted']));
+            startSensors(denied);
+            btn.textContent = 'センサー動作中';
+        }).catch((err) => {
+            console.error(err);
+            ['card-orientation', 'card-compass', 'card-motion', 'card-rotation']
+                .forEach(id => setStatus(id, 'error'));
+            btn.disabled = false;
+        });
+    });
+
+    function startSensors(denied) {
+        if (hasOrientation) {
+            if (denied.orientation) {
+                setStatus('card-orientation', 'denied');
+                setStatus('card-compass', 'denied');
+            } else {
+                window.addEventListener('deviceorientation', onOrientation);
+                if ('ondeviceorientationabsolute' in window) {
+                    window.addEventListener('deviceorientationabsolute', onOrientationAbsolute);
+                }
+                setStatus('card-orientation', 'active');
+                setStatus('card-compass', 'active');
+                watchNoData('orientation', 'card-orientation');
+                watchNoData('compass', 'card-compass');
+            }
+        }
+        if (hasMotion) {
+            if (denied.motion) {
+                setStatus('card-motion', 'denied');
+                setStatus('card-rotation', 'denied');
+            } else {
+                window.addEventListener('devicemotion', onMotion);
+                setStatus('card-motion', 'active');
+                setStatus('card-rotation', 'active');
+                watchNoData('motion', 'card-motion');
+                watchNoData('rotation', 'card-rotation');
+            }
+        }
+    }
+
+    function watchNoData(key, cardId) {
+        setTimeout(() => {
+            if (!received[key]) setStatus(cardId, 'nodata', 'データなし（センサー非搭載の可能性）');
+        }, NO_DATA_TIMEOUT);
+    }
+
+    // ---------- 加速度グラフ ----------
+    const graph = $('accel-graph');
+    const gctx = graph.getContext('2d');
+    function resizeGraph() {
+        const dpr = window.devicePixelRatio || 1;
+        const w = graph.parentElement.clientWidth - 32;
+        const h = 140;
+        graph.style.width = w + 'px';
+        graph.style.height = h + 'px';
+        graph.width = Math.round(w * dpr);
+        graph.height = Math.round(h * dpr);
+        gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resizeGraph();
+    window.addEventListener('resize', resizeGraph);
+
+    function drawGraph(now) {
+        const w = graph.clientWidth, h = graph.clientHeight;
+        const span = GRAPH_SECONDS * 1000;
+        while (graphBuf.length && graphBuf[0].t < now - span) graphBuf.shift();
+
+        gctx.clearRect(0, 0, w, h);
+        // 目盛り
+        gctx.strokeStyle = '#e9ecef';
+        gctx.lineWidth = 1;
+        gctx.fillStyle = '#adb5bd';
+        gctx.font = '10px sans-serif';
+        for (const v of [GRAPH_RANGE, GRAPH_RANGE / 2, 0, -GRAPH_RANGE / 2, -GRAPH_RANGE]) {
+            const y = h / 2 - (v / GRAPH_RANGE) * (h / 2 - 4);
+            gctx.beginPath();
+            gctx.moveTo(0, y);
+            gctx.lineTo(w, y);
+            gctx.stroke();
+            if (v !== GRAPH_RANGE && v !== -GRAPH_RANGE) gctx.fillText(String(v), 2, y - 2);
+        }
+        if (graphBuf.length < 2) return;
+
+        const css = getComputedStyle(document.documentElement);
+        const series = [['x', css.getPropertyValue('--x')], ['y', css.getPropertyValue('--y')], ['z', css.getPropertyValue('--z')]];
+        gctx.lineWidth = 1.5;
+        for (const [key, color] of series) {
+            gctx.strokeStyle = color.trim();
+            gctx.beginPath();
+            graphBuf.forEach((p, i) => {
+                const x = w - ((now - p.t) / span) * w;
+                const v = Math.max(-GRAPH_RANGE, Math.min(GRAPH_RANGE, p[key]));
+                const y = h / 2 - (v / GRAPH_RANGE) * (h / 2 - 4);
+                if (i === 0) gctx.moveTo(x, y); else gctx.lineTo(x, y);
+            });
+            gctx.stroke();
+        }
+    }
+
+    // ---------- 描画ループ ----------
+    const bubble = $('bubble');
+    const dial = $('compass-dial');
+    function render(now) {
+        if (latest.dirty) {
+            latest.dirty = false;
+            const o = latest.orientation;
+            if (o) {
+                $('ori-alpha').textContent = fmt(o.alpha, 1, '°');
+                $('ori-beta').textContent = fmt(o.beta, 1, '°');
+                $('ori-gamma').textContent = fmt(o.gamma, 1, '°');
+                // 水準器: ±45° で円の端（半径 58px）
+                const clamp = (v) => Math.max(-45, Math.min(45, v || 0));
+                let dx = clamp(o.gamma) / 45 * 58;
+                let dy = clamp(o.beta) / 45 * 58;
+                const r = Math.hypot(dx, dy);
+                if (r > 58) { dx *= 58 / r; dy *= 58 / r; }
+                // 泡は高い方へ動く
+                bubble.style.transform = `translate(${-dx}px, ${-dy}px)`;
+            }
+            if (latest.heading !== null) {
+                $('compass-deg').textContent = fmt(latest.heading, 0, '°');
+                $('compass-dir').textContent = dirName(latest.heading);
+                dial.style.transform = `rotate(${-latest.heading}deg)`;
+            }
+            const g = latest.accelG;
+            if (g) {
+                $('acc-x').textContent = fmt(g.x, 2, 'm/s²');
+                $('acc-y').textContent = fmt(g.y, 2, 'm/s²');
+                $('acc-z').textContent = fmt(g.z, 2, 'm/s²');
+            }
+            if (latest.accelLin !== null) $('acc-lin').textContent = fmt(latest.accelLin, 2, 'm/s²');
+            $('shake-count').textContent = shakeCount;
+            const rr = latest.rotation;
+            if (rr) {
+                $('rot-alpha').textContent = fmt(rr.alpha, 1, '°/s');
+                $('rot-beta').textContent = fmt(rr.beta, 1, '°/s');
+                $('rot-gamma').textContent = fmt(rr.gamma, 1, '°/s');
+            }
+        }
+        drawGraph(now);
+        renderMic();
+        requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+
+    // ---------- ⑤ 位置情報 ----------
+    let geoWatchId = null;
+    if (!('geolocation' in navigator)) {
+        setStatus('card-geo', 'unsupported');
+        $('btn-geo').disabled = true;
+    }
+    $('btn-geo').addEventListener('click', () => {
+        if (geoWatchId !== null) { stopGeo(); return; }
+        setStatus('card-geo', 'idle', '取得中…');
+        $('btn-geo').textContent = '停止';
+        geoWatchId = navigator.geolocation.watchPosition(onGeo, onGeoError, {
+            enableHighAccuracy: true, maximumAge: 0, timeout: 20000
+        });
+    });
+    function onGeo(pos) {
+        const c = pos.coords;
+        setStatus('card-geo', 'active');
+        $('geo-lat').textContent = fmt(c.latitude, 6, '°');
+        $('geo-lon').textContent = fmt(c.longitude, 6, '°');
+        $('geo-acc').textContent = fmt(c.accuracy, 0, 'm');
+        $('geo-alt').textContent = fmt(c.altitude, 1, 'm');
+        $('geo-speed').textContent = c.speed === null ? '—' : fmt(c.speed * 3.6, 1, 'km/h');
+        $('geo-heading').textContent = (c.heading === null || Number.isNaN(c.heading))
+            ? '—' : fmt(c.heading, 0, '°') + '（' + dirName(c.heading) + '）';
+        $('geo-time').textContent = new Date(pos.timestamp).toLocaleTimeString('ja-JP');
+    }
+    function onGeoError(err) {
+        if (err.code === err.PERMISSION_DENIED) {
+            setStatus('card-geo', 'denied');
+            stopGeo(true);
+        } else if (err.code === err.TIMEOUT) {
+            setStatus('card-geo', 'nodata', 'タイムアウト（再試行中）');
+        } else {
+            setStatus('card-geo', 'error');
+        }
+    }
+    function stopGeo(keepStatus) {
+        if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+        geoWatchId = null;
+        $('btn-geo').textContent = '取得開始';
+        if (!keepStatus) setStatus('card-geo', 'idle', '停止中');
+    }
+
+    // ---------- ⑥ マイク音量 ----------
+    let mic = null;   // {stream, ctx, analyser, buf}
+    let micPeak = -Infinity;
+    let micLevel = -Infinity;
+    const MIC_MIN_DB = -60;
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+        setStatus('card-mic', 'unsupported');
+        $('btn-mic').disabled = true;
+    }
+    $('btn-mic').addEventListener('click', async () => {
+        if (mic) { stopMic(); return; }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            });
+            const AC = window.AudioContext || window.webkitAudioContext;
+            const ctx = new AC();
+            await ctx.resume();
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 2048;
+            ctx.createMediaStreamSource(stream).connect(analyser);
+            mic = { stream, ctx, analyser, buf: new Float32Array(analyser.fftSize) };
+            micPeak = -Infinity;
+            setStatus('card-mic', 'active');
+            $('btn-mic').textContent = '停止';
+        } catch (err) {
+            console.error(err);
+            setStatus('card-mic', err.name === 'NotAllowedError' ? 'denied' : 'error');
+        }
+    });
+    function renderMic() {
+        if (!mic) return;
+        mic.analyser.getFloatTimeDomainData(mic.buf);
+        let sum = 0;
+        for (let i = 0; i < mic.buf.length; i++) sum += mic.buf[i] * mic.buf[i];
+        const rms = Math.sqrt(sum / mic.buf.length);
+        micLevel = Math.max(-100, 20 * Math.log10(rms || 1e-10));
+        micPeak = Math.max(micPeak, micLevel);
+        const pct = (db) => Math.max(0, Math.min(100, (db - MIC_MIN_DB) / -MIC_MIN_DB * 100));
+        $('mic-fill').style.width = pct(micLevel) + '%';
+        $('mic-peak').style.left = pct(micPeak) + '%';
+        $('mic-level').textContent = fmt(micLevel, 1, 'dBFS');
+        $('mic-peak-val').textContent = fmt(micPeak, 1, 'dBFS');
+    }
+    function stopMic() {
+        if (!mic) return;
+        mic.stream.getTracks().forEach(t => t.stop());
+        mic.ctx.close();
+        mic = null;
+        $('btn-mic').textContent = '開始';
+        setStatus('card-mic', 'idle', '停止中');
+    }
+
+    // ---------- ⑦ タッチ ----------
+    const touchArea = $('touch-area');
+    const pointers = new Map();   // pointerId -> {x, y, pressure, dot}
+    let touchMax = 0;
+    if (!('PointerEvent' in window)) setStatus('card-touch', 'unsupported');
+    else setStatus('card-touch', 'active', '待機中');
+
+    function updatePointer(e) {
+        const rect = touchArea.getBoundingClientRect();
+        const x = e.clientX - rect.left, y = e.clientY - rect.top;
+        let p = pointers.get(e.pointerId);
+        if (!p) {
+            const dot = document.createElement('div');
+            dot.className = 'touch-dot';
+            touchArea.appendChild(dot);
+            p = { dot };
+            pointers.set(e.pointerId, p);
+        }
+        p.x = x; p.y = y; p.pressure = e.pressure; p.type = e.pointerType;
+        p.dot.style.left = x + 'px';
+        p.dot.style.top = y + 'px';
+        renderTouch();
+    }
+    function removePointer(e) {
+        const p = pointers.get(e.pointerId);
+        if (p) { p.dot.remove(); pointers.delete(e.pointerId); }
+        renderTouch();
+    }
+    function renderTouch() {
+        touchMax = Math.max(touchMax, pointers.size);
+        $('touch-count').textContent = pointers.size;
+        $('touch-max').textContent = touchMax;
+        let i = 0;
+        $('touch-list').textContent = [...pointers.values()].map(p =>
+            `#${++i} ${p.type.padEnd(5)} x:${p.x.toFixed(0).padStart(4)} y:${p.y.toFixed(0).padStart(4)}` +
+            (p.type === 'mouse' ? '' : ` 強さ:${p.pressure.toFixed(2)}`)
+        ).join('\n');
+        setStatus('card-touch', 'active', pointers.size ? '動作中' : '待機中');
+    }
+    touchArea.addEventListener('pointerdown', (e) => {
+        touchArea.setPointerCapture(e.pointerId);
+        updatePointer(e);
+    });
+    touchArea.addEventListener('pointermove', (e) => { if (pointers.has(e.pointerId)) updatePointer(e); });
+    ['pointerup', 'pointercancel'].forEach(t => touchArea.addEventListener(t, removePointer));
+
+    // ---------- ⑧ 端末情報 ----------
+    const ORIENT_LABEL = {
+        'portrait-primary': '縦', 'portrait-secondary': '縦（逆さ）',
+        'landscape-primary': '横', 'landscape-secondary': '横（逆向き）'
+    };
+    function renderDevice() {
+        const so = screen.orientation;
+        $('dev-orient').textContent = so
+            ? (ORIENT_LABEL[so.type] || so.type) + '（' + so.angle + '°）'
+            : (window.innerHeight >= window.innerWidth ? '縦' : '横');
+        $('dev-screen').textContent = screen.width + ' × ' + screen.height;
+        $('dev-viewport').textContent = window.innerWidth + ' × ' + window.innerHeight;
+        $('dev-dpr').textContent = String(window.devicePixelRatio);
+        $('dev-online').textContent = navigator.onLine ? 'はい' : 'いいえ';
+        const conn = navigator.connection;
+        $('dev-net-type').textContent = conn && conn.effectiveType ? conn.effectiveType : '—（このブラウザでは取得不可）';
+        $('dev-net-down').textContent = conn && typeof conn.downlink === 'number' ? conn.downlink + ' Mbps' : '—（このブラウザでは取得不可）';
+    }
+    renderDevice();
+    setStatus('card-device', 'active');
+    window.addEventListener('resize', renderDevice);
+    window.addEventListener('online', renderDevice);
+    window.addEventListener('offline', renderDevice);
+    if (screen.orientation) screen.orientation.addEventListener('change', renderDevice);
+    if (navigator.connection) navigator.connection.addEventListener('change', renderDevice);
+
+    if (navigator.getBattery) {
+        navigator.getBattery().then((bat) => {
+            const show = () => {
+                $('dev-battery').textContent = Math.round(bat.level * 100) + ' %';
+                $('dev-charging').textContent = bat.charging ? '充電中' : '充電していない';
+            };
+            show();
+            bat.addEventListener('levelchange', show);
+            bat.addEventListener('chargingchange', show);
+        }).catch(() => {
+            $('dev-battery').textContent = '—（取得不可）';
+            $('dev-charging').textContent = '—（取得不可）';
+        });
+    } else {
+        $('dev-battery').textContent = '—（このブラウザでは取得不可）';
+        $('dev-charging').textContent = '—（このブラウザでは取得不可）';
+    }
+
+    // ---------- ⑨ バイブ ----------
+    if (typeof navigator.vibrate === 'function') {
+        setStatus('card-vibrate', 'active', '使用可');
+        $('btn-vib-short').addEventListener('click', () => navigator.vibrate(200));
+        $('btn-vib-pattern').addEventListener('click', () => navigator.vibrate([100, 80, 100, 80, 300]));
+    } else {
+        setStatus('card-vibrate', 'unsupported');
+        $('btn-vib-short').disabled = true;
+        $('btn-vib-pattern').disabled = true;
+    }
+
+    // ---------- 後始末 ----------
+    window.addEventListener('pagehide', () => {
+        stopMic();
+        stopGeo();
+    });
+})();
+</script>
+
+</body>
+</html>
