@@ -152,6 +152,8 @@
             border-radius: 50%;
             background: rgba(28, 126, 214, 0.75);
         }
+        .level.face-down { background: #fff4e6; border-color: #ffc078; }
+        .level.face-down .bubble { background: rgba(232, 89, 12, 0.75); }
 
         /* コンパス */
         .compass {
@@ -205,6 +207,7 @@
         .legend .lx { color: var(--x); }
         .legend .ly { color: var(--y); }
         .legend .lz { color: var(--z); }
+        .vib-result { font-size: 13px; margin-top: 10px; min-height: 1.2em; }
 
         /* 音量メーター */
         .meter {
@@ -289,13 +292,16 @@
         <section class="card" id="card-orientation">
             <div class="card-head"><h2>① 傾き</h2><span class="badge">未開始</span></div>
             <div class="visual">
-                <div class="level"><div class="ring"></div><div class="bubble" id="bubble"></div></div>
+                <div class="level" id="level"><div class="ring"></div><div class="bubble" id="bubble"></div></div>
             </div>
             <dl class="values">
                 <dt>alpha（Z軸回転）</dt><dd id="ori-alpha">—</dd>
                 <dt>beta（前後の傾き）</dt><dd id="ori-beta">—</dd>
                 <dt>gamma（左右の傾き）</dt><dd id="ori-gamma">—</dd>
+                <dt>水平からの傾き</dt><dd id="ori-tilt">—</dd>
+                <dt>画面の向き</dt><dd id="ori-face">—</dd>
             </dl>
+            <p class="card-note">水準器は重力の向きから計算しているので、裏返しても連続して動きます（裏向きのときはオレンジ色）。beta は ±180° の境目で符号が反転するのが正常な動作です。</p>
         </section>
 
         <!-- ② 方位 -->
@@ -335,11 +341,14 @@
         <!-- ④ 回転速度 -->
         <section class="card" id="card-rotation">
             <div class="card-head"><h2>④ 回転速度（ジャイロ）</h2><span class="badge">未開始</span></div>
-            <dl class="values">
+            <div class="legend"><span class="lx">alpha</span><span class="ly">beta</span><span class="lz">gamma</span></div>
+            <canvas id="rot-graph" height="140"></canvas>
+            <dl class="values" style="margin-top: 10px;">
                 <dt>alpha（Z軸）</dt><dd id="rot-alpha">—</dd>
                 <dt>beta（X軸）</dt><dd id="rot-beta">—</dd>
                 <dt>gamma（Y軸）</dt><dd id="rot-gamma">—</dd>
             </dl>
+            <p class="card-note">グラフは直近10秒・±360 °/s の範囲です。</p>
         </section>
 
         <!-- ⑤ 位置情報 -->
@@ -402,8 +411,10 @@
             <div class="card-actions">
                 <button class="small" id="btn-vib-short">200ms 振動</button>
                 <button class="small" id="btn-vib-pattern">パターン振動</button>
+                <button class="small" id="btn-vib-long">1秒 振動</button>
             </div>
-            <p class="card-note">Android の Chrome などで動作します。iPhone では使えません。</p>
+            <div class="vib-result" id="vib-result"></div>
+            <p class="card-note">Android の Chrome などで動作します。iPhone では使えません。「受け付けました」と出ても振動しない場合は、端末の「設定 → サウンドとバイブレーション → バイブレーションとハプティクス」がオフになっていないか確認してください。アプリ内ブラウザ（LINE・GitHub アプリなど）では動かないことがあります。</p>
         </section>
     </div>
 </div>
@@ -415,7 +426,10 @@
     const $ = (id) => document.getElementById(id);
     const NO_DATA_TIMEOUT = 3000;      // 開始後この時間イベントが来なければ「データなし」
     const GRAPH_SECONDS = 10;          // グラフに表示する秒数
-    const GRAPH_RANGE = 20;            // グラフの縦軸 ±m/s²
+    const GRAPH_RANGE = 20;            // 加速度グラフの縦軸 ±m/s²
+    const ROT_GRAPH_RANGE = 360;       // 回転速度グラフの縦軸 ±°/s
+    const LEVEL_RADIUS = 58;           // 水準器の泡が動ける半径 (px)
+    const LEVEL_MAX_TILT = 45;         // この角度で泡が円の端に届く (°)
     const SHAKE_THRESHOLD = 15;        // シェイク判定（重力を除いた加速度 m/s²）
     const SHAKE_COOLDOWN = 500;        // シェイクの連続カウント防止 (ms)
 
@@ -452,7 +466,8 @@
     let lastShake = 0;
 
     // 加速度グラフ用リングバッファ
-    const graphBuf = [];   // {t, x, y, z}
+    const accelBuf = [];   // {t, x, y, z}
+    const rotBuf = [];     // {t, alpha, beta, gamma}
 
     function onOrientation(e) {
         if (e.alpha === null && e.beta === null && e.gamma === null) return;
@@ -479,7 +494,7 @@
         if (g && g.x !== null) {
             latest.accelG = { x: g.x, y: g.y, z: g.z };
             received.motion = true;
-            graphBuf.push({ t: performance.now(), x: g.x, y: g.y, z: g.z });
+            accelBuf.push({ t: performance.now(), x: g.x, y: g.y, z: g.z });
         }
         const a = e.acceleration;
         if (a && a.x !== null) {
@@ -494,6 +509,7 @@
         const r = e.rotationRate;
         if (r && (r.alpha !== null || r.beta !== null || r.gamma !== null)) {
             latest.rotation = { alpha: r.alpha, beta: r.beta, gamma: r.gamma };
+            rotBuf.push({ t: performance.now(), alpha: r.alpha || 0, beta: r.beta || 0, gamma: r.gamma || 0 });
             received.rotation = true;
         }
         latest.dirty = true;
@@ -566,57 +582,92 @@
         }, NO_DATA_TIMEOUT);
     }
 
-    // ---------- 加速度グラフ ----------
-    const graph = $('accel-graph');
-    const gctx = graph.getContext('2d');
-    function resizeGraph() {
-        const dpr = window.devicePixelRatio || 1;
-        const w = graph.parentElement.clientWidth - 32;
-        const h = 140;
-        graph.style.width = w + 'px';
-        graph.style.height = h + 'px';
-        graph.width = Math.round(w * dpr);
-        graph.height = Math.round(h * dpr);
-        gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    resizeGraph();
-    window.addEventListener('resize', resizeGraph);
-
-    function drawGraph(now) {
-        const w = graph.clientWidth, h = graph.clientHeight;
-        const span = GRAPH_SECONDS * 1000;
-        while (graphBuf.length && graphBuf[0].t < now - span) graphBuf.shift();
-
-        gctx.clearRect(0, 0, w, h);
-        // 目盛り
-        gctx.strokeStyle = '#e9ecef';
-        gctx.lineWidth = 1;
-        gctx.fillStyle = '#adb5bd';
-        gctx.font = '10px sans-serif';
-        for (const v of [GRAPH_RANGE, GRAPH_RANGE / 2, 0, -GRAPH_RANGE / 2, -GRAPH_RANGE]) {
-            const y = h / 2 - (v / GRAPH_RANGE) * (h / 2 - 4);
-            gctx.beginPath();
-            gctx.moveTo(0, y);
-            gctx.lineTo(w, y);
-            gctx.stroke();
-            if (v !== GRAPH_RANGE && v !== -GRAPH_RANGE) gctx.fillText(String(v), 2, y - 2);
-        }
-        if (graphBuf.length < 2) return;
-
+    // ---------- 時系列グラフ（加速度・回転速度で共用） ----------
+    function createGraph(canvasId, buf, range, keys) {
+        const canvas = $(canvasId);
+        const ctx = canvas.getContext('2d');
         const css = getComputedStyle(document.documentElement);
-        const series = [['x', css.getPropertyValue('--x')], ['y', css.getPropertyValue('--y')], ['z', css.getPropertyValue('--z')]];
-        gctx.lineWidth = 1.5;
-        for (const [key, color] of series) {
-            gctx.strokeStyle = color.trim();
-            gctx.beginPath();
-            graphBuf.forEach((p, i) => {
-                const x = w - ((now - p.t) / span) * w;
-                const v = Math.max(-GRAPH_RANGE, Math.min(GRAPH_RANGE, p[key]));
-                const y = h / 2 - (v / GRAPH_RANGE) * (h / 2 - 4);
-                if (i === 0) gctx.moveTo(x, y); else gctx.lineTo(x, y);
-            });
-            gctx.stroke();
+        const colors = ['--x', '--y', '--z'].map(v => css.getPropertyValue(v).trim());
+        const span = GRAPH_SECONDS * 1000;
+
+        function resize() {
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.parentElement.clientWidth - 32;
+            const h = 140;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         }
+        resize();
+        window.addEventListener('resize', resize);
+
+        const toY = (v, h) => h / 2 - (Math.max(-range, Math.min(range, v)) / range) * (h / 2 - 4);
+
+        function draw(now) {
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            while (buf.length && buf[0].t < now - span) buf.shift();
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = '#e9ecef';
+            ctx.lineWidth = 1;
+            ctx.fillStyle = '#adb5bd';
+            ctx.font = '10px sans-serif';
+            for (const v of [range, range / 2, 0, -range / 2, -range]) {
+                const y = toY(v, h);
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+                if (Math.abs(v) !== range) ctx.fillText(String(v), 2, y - 2);
+            }
+            if (buf.length < 2) return;
+
+            ctx.lineWidth = 1.5;
+            keys.forEach((key, k) => {
+                ctx.strokeStyle = colors[k];
+                ctx.beginPath();
+                buf.forEach((p, i) => {
+                    const x = w - ((now - p.t) / span) * w;
+                    const y = toY(p[key], h);
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+            });
+        }
+        return { draw };
+    }
+    const accelGraph = createGraph('accel-graph', accelBuf, GRAPH_RANGE, ['x', 'y', 'z']);
+    const rotGraph = createGraph('rot-graph', rotBuf, ROT_GRAPH_RANGE, ['alpha', 'beta', 'gamma']);
+
+    // ---------- 水準器 ----------
+    // beta/gamma を直接使うと、裏返したとき（beta が ±180° をまたぐとき）に値が飛ぶ。
+    // そこで「真上」の向きを端末の座標系で表したベクトルを求め、その水平成分で泡を動かす。
+    //   up = (-cosβ·sinγ, sinβ, cosβ·cosγ)   ※x: 右, y: 上端, z: 画面の手前
+    // 表向きでも裏向きでも、水平に置けば x, y 成分は 0 になるので連続して動く。
+    const levelEl = $('level');
+    const rad = (d) => d * Math.PI / 180;
+    function updateLevel(beta, gamma) {
+        const b = rad(beta), g = rad(gamma);
+        const ux = -Math.cos(b) * Math.sin(g);
+        const uy = Math.sin(b);
+        const uz = Math.cos(b) * Math.cos(g);
+        const horiz = Math.min(1, Math.hypot(ux, uy));
+        const tilt = Math.asin(horiz) * 180 / Math.PI;   // 表・裏どちらかの水平面からの傾き 0〜90°
+        const faceDown = uz < 0;
+
+        // 泡は高い方へ動く（画面座標は y が下向きなので uy の符号を反転）
+        let dx = 0, dy = 0;
+        if (horiz > 1e-6) {
+            const dist = Math.min(tilt / LEVEL_MAX_TILT, 1) * LEVEL_RADIUS;
+            dx = ux / horiz * dist;
+            dy = -uy / horiz * dist;
+        }
+        bubble.style.transform = `translate(${dx}px, ${dy}px)`;
+        levelEl.classList.toggle('face-down', faceDown);
+        $('ori-tilt').textContent = fmt(tilt, 1, '°');
+        $('ori-face').textContent = faceDown ? '裏向き（画面が下）' : '表向き（画面が上）';
     }
 
     // ---------- 描画ループ ----------
@@ -630,14 +681,7 @@
                 $('ori-alpha').textContent = fmt(o.alpha, 1, '°');
                 $('ori-beta').textContent = fmt(o.beta, 1, '°');
                 $('ori-gamma').textContent = fmt(o.gamma, 1, '°');
-                // 水準器: ±45° で円の端（半径 58px）
-                const clamp = (v) => Math.max(-45, Math.min(45, v || 0));
-                let dx = clamp(o.gamma) / 45 * 58;
-                let dy = clamp(o.beta) / 45 * 58;
-                const r = Math.hypot(dx, dy);
-                if (r > 58) { dx *= 58 / r; dy *= 58 / r; }
-                // 泡は高い方へ動く
-                bubble.style.transform = `translate(${-dx}px, ${-dy}px)`;
+                updateLevel(o.beta || 0, o.gamma || 0);
             }
             if (latest.heading !== null) {
                 $('compass-deg').textContent = fmt(latest.heading, 0, '°');
@@ -659,7 +703,8 @@
                 $('rot-gamma').textContent = fmt(rr.gamma, 1, '°/s');
             }
         }
-        drawGraph(now);
+        accelGraph.draw(now);
+        rotGraph.draw(now);
         renderMic();
         requestAnimationFrame(render);
     }
@@ -853,13 +898,23 @@
 
     // ---------- ⑨ バイブ ----------
     if (typeof navigator.vibrate === 'function') {
-        setStatus('card-vibrate', 'active', '使用可');
-        $('btn-vib-short').addEventListener('click', () => navigator.vibrate(200));
-        $('btn-vib-pattern').addEventListener('click', () => navigator.vibrate([100, 80, 100, 80, 300]));
+        setStatus('card-vibrate', 'active', 'API あり');
+        const vibrate = (pattern) => {
+            const ok = navigator.vibrate(pattern);
+            const el = $('vib-result');
+            el.style.color = ok ? '#2b8a3e' : '#c92a2a';
+            el.textContent = ok
+                ? 'ブラウザは振動命令を受け付けました（' + new Date().toLocaleTimeString('ja-JP') + '）'
+                : 'ブラウザに拒否されました（vibrate() が false を返しました）';
+        };
+        $('btn-vib-short').addEventListener('click', () => vibrate(200));
+        $('btn-vib-pattern').addEventListener('click', () => vibrate([100, 80, 100, 80, 300]));
+        $('btn-vib-long').addEventListener('click', () => vibrate(1000));
     } else {
         setStatus('card-vibrate', 'unsupported');
         $('btn-vib-short').disabled = true;
         $('btn-vib-pattern').disabled = true;
+        $('btn-vib-long').disabled = true;
     }
 
     // ---------- 後始末 ----------
