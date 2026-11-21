@@ -138,6 +138,14 @@
             font-size: 12px;
             background-color: #28a745;
         }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 16px;
+            color: #007bff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link:hover { text-decoration: underline; }
         .copy-btn:hover {
             background-color: #218838;
         }
@@ -146,6 +154,7 @@
 <body>
 
 <div class="container">
+    <a href="index.html" class="back-link">← トップへ戻る</a>
     <div class="io-container">
         <div class="io-box">
             <div class="io-header">
@@ -302,8 +311,9 @@
     // 行のソート
     function sortLines(asc) {
         const lines = inputEl.value.split('\n');
-        lines.sort();
-        if (!asc) lines.reverse();
+        // 日本語ロケールで比較（ひらがな/カタカナ・全角/半角を同一視し、数字は数値として比較）
+        const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
+        lines.sort((a, b) => asc ? collator.compare(a, b) : collator.compare(b, a));
         outputEl.value = lines.join('\n');
     }
 
