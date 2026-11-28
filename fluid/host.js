@@ -10,7 +10,7 @@
 //     params: [ ... ],                    // ui.js を参照
 //     isSupported() { return true; },     // 省略可。false / Promise<false> なら動かさない
 //     unsupportedMessage: '...',          // 省略可
-//     create(canvas, ctx, params) {       // インスタンスを返す（Promise でもよい）
+//     create(canvas, ctx, params, host) { // インスタンスを返す（Promise でもよい）
 //       return {
 //         resize(width, height, dpr) {},  // canvas のピクセルサイズ。create の直後にも呼ばれる
 //         step(dt, input) {},             // dt 秒進める（一時停止中は呼ばれない）
@@ -20,6 +20,10 @@
 //       };
 //     },
 //   }
+//
+// create の第 4 引数 host で、シミュレーション側からホストに頼めること:
+//   host.showMessage(text)    // ページ上部に案内を出す（'' で消す）
+//   host.setParam(key, value) // パラメータの値と画面上の表示を変える（onParam は呼ばれない）
 
 import { SIMS } from './sims/registry.js';
 import { Input } from './input.js';
@@ -115,7 +119,7 @@ export function startHost(el) {
         const cur = current;
         let instance;
         try {
-            instance = await cur.mod.create(cur.canvas, cur.ctx, { ...cur.params });
+            instance = await cur.mod.create(cur.canvas, cur.ctx, { ...cur.params }, hostApi(cur, token));
         } catch (err) {
             if (token === loadToken) fail('シミュレーションの初期化に失敗しました', err);
             return;
@@ -123,6 +127,19 @@ export function startHost(el) {
         if (token !== loadToken || current !== cur) { instance?.dispose?.(); return; }
         cur.instance = instance;
         applySize();
+    }
+
+    // シミュレーションに渡す窓口。切り替え後に古いインスタンスから呼ばれても無視する
+    function hostApi(cur, token) {
+        const alive = () => current === cur && token === loadToken;
+        return {
+            showMessage(text) { if (alive()) showMessage(text); },
+            setParam(key, value) {
+                if (!alive()) return;
+                cur.params[key] = value;
+                buildPanel();
+            },
+        };
     }
 
     function stopInstance() {

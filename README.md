@@ -43,8 +43,9 @@ python3 -m http.server 8000
 | `fluid/host.js` | 読み込み・切り替え、canvas の管理、描画ループ、一時停止・リセット |
 | `fluid/input.js` | タッチ・マウス、傾き（重力の向き）、シェイク、矢印キー |
 | `fluid/ui.js` | `params` の定義からパラメータ操作パネルを自動生成 |
+| `fluid/camera.js` | カメラ映像を格子サイズの RGBA として取り出す（背面 / 前面、前面は左右反転） |
 | `fluid/sims/registry.js` | シミュレーションの一覧 |
-| `fluid/sims/ripple.js` | ① 波紋（2 次元の波動方程式） |
+| `fluid/sims/ripple.js` | ① 波紋（2 次元の波動方程式）。背景はタイル / カメラ映像 |
 
 新しいシミュレーションを追加するには:
 
