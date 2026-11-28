@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>液体シミュレーション</title>
+    <style>
+        :root {
+            --bg: #f4f6f9;
+            --card: #ffffff;
+            --text: #333;
+            --sub: #6c757d;
+            --accent: #007bff;
+            --accent-hover: #0056b3;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 12px;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link:hover { text-decoration: underline; }
+        h1 { font-size: 1.4rem; margin: 0 0 12px; }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .toolbar select {
+            flex: 1 1 220px;
+            padding: 8px 10px;
+            font-size: 15px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            background: var(--card);
+            color: var(--text);
+        }
+        button {
+            padding: 8px 14px;
+            font-size: 14px;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            background: var(--accent);
+            color: #fff;
+            cursor: pointer;
+        }
+        button:hover { background: var(--accent-hover); }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.secondary { background: #e9ecef; color: var(--text); }
+        button.secondary:hover { background: #dee2e6; }
+        .fps {
+            margin-left: auto;
+            font-family: monospace;
+            font-size: 13px;
+            color: var(--sub);
+        }
+        .desc { font-size: 14px; color: var(--sub); margin: 0 0 12px; line-height: 1.6; }
+        .message {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .stage {
+            position: relative;
+            width: 100%;
+            height: 65vh;
+            height: 65svh;
+            min-height: 280px;
+            max-height: 720px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #10141c;
+        }
+        .sim-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;       /* ドラッグでページがスクロールしないように */
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            margin-top: 16px;
+        }
+        .card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .card h2 {
+            font-size: 15px;
+            margin: 0;
+            border-left: 4px solid var(--accent);
+            padding-left: 8px;
+        }
+        .params {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 14px 20px;
+        }
+        .param { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+        .param-head { display: flex; justify-content: space-between; gap: 8px; }
+        .param output { font-family: monospace; color: var(--sub); }
+        .param input[type="range"] { width: 100%; }
+        .param select { padding: 6px 8px; font-size: 14px; border: 1px solid #ced4da; border-radius: 6px; }
+        .param-checkbox { flex-direction: row-reverse; justify-content: flex-end; align-items: center; }
+        .note { font-size: 12px; color: var(--sub); margin: 12px 0 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <a href="index.html" class="back-link">← トップへ戻る</a>
+    <h1>💧 液体シミュレーション</h1>
+
+    <div class="toolbar">
+        <select id="sim-select" aria-label="シミュレーションの種類"></select>
+        <button id="btn-pause" class="secondary" type="button">⏸ 一時停止</button>
+        <button id="btn-reset" class="secondary" type="button">↺ リセット</button>
+        <button id="btn-sensor" type="button" hidden>📱 傾きセンサーを使う</button>
+        <span id="fps" class="fps">— FPS</span>
+    </div>
+    <p id="desc" class="desc"></p>
+    <div id="message" class="message" hidden></div>
+
+    <div id="stage" class="stage"></div>
+
+    <section class="card">
+        <div class="card-head">
+            <h2>パラメータ</h2>
+            <button id="btn-reset-params" class="secondary" type="button">初期値に戻す</button>
+        </div>
+        <div id="params" class="params"></div>
+    </section>
+
+    <p class="note">PC で傾きを使うシミュレーションでは、矢印キーで重力の向きを変えられます。</p>
+</div>
+
+<script>
+    // ES Modules は file:// では読み込めないため、その場合は案内を出す
+    if (location.protocol === 'file:') {
+        const m = document.getElementById('message');
+        m.hidden = false;
+        m.textContent = 'このページはファイルを直接開くと動きません。python3 -m http.server 8000 などで簡易サーバーを立てて開いてください。';
+    }
+</script>
+<script type="module">
+    import { startHost } from './fluid/host.js';
+    const $ = (id) => document.getElementById(id);
+    startHost({
+        select: $('sim-select'),
+        stage: $('stage'),
+        desc: $('desc'),
+        message: $('message'),
+        panel: $('params'),
+        resetParams: $('btn-reset-params'),
+        pause: $('btn-pause'),
+        reset: $('btn-reset'),
+        sensor: $('btn-sensor'),
+        fps: $('fps'),
+    });
+</script>
+</body>
+</html>
