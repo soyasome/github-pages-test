@@ -4,7 +4,9 @@
 //   h_next = (上下左右 4 つの和) / 2 − h_prev
 // で更新する（波の速さ c² = 0.5 マス²/ステップ² の波動方程式の差分）。
 // 端は「壁」として扱い、波が反射する。
-// 描画は、高さの傾きで底のタイル模様をずらして屈折を表し、光の反射を足す。
+// 描画は、高さの傾きで背景（タイル模様またはカメラ映像）をずらして屈折を表し、光の反射を足す。
+
+import { Camera } from '../camera.js';
 
 const BASE_COLS = 256;          // この解像度を基準に、水滴の大きさなどを揃える
 const STEPS_PER_SEC = 60;       // 「波の速さ 1」のときの 1 秒あたりのステップ数
@@ -13,6 +15,9 @@ const REFRACTION = 6;           // 傾き → 背景のずれ（マス）
 const NORMAL_SCALE = 1.5;       // 傾き → 光の当たり方
 const LIGHT = normalize([-0.5, -0.7, 0.6]);
 const HALF = normalize([LIGHT[0], LIGHT[1], LIGHT[2] + 1]);
+const WATER_TINT = [20, 90, 130];   // カメラ映像に混ぜる水の色
+const TINT_AMOUNT = 0.18;
+const FACING = { cameraBack: 'environment', cameraFront: 'user' };
 
 function normalize(v) {
     const l = Math.hypot(...v);
@@ -22,7 +27,8 @@ function normalize(v) {
 export default {
     description:
         '水面の高さを格子で持ち、波動方程式で波を伝えます。' +
-        'タップで水滴を落とし、ドラッグで波を起こせます。波は壁で反射します。',
+        'タップで水滴を落とし、ドラッグで波を起こせます。波は壁で反射します。' +
+        '背景はカメラ映像にもできます。',
     context: '2d',
     contextOptions: { alpha: false },
     inputs: ['pointer'],
@@ -33,31 +39,65 @@ export default {
         { key: 'dropSize', label: '水滴の大きさ', type: 'range', min: 2, max: 20, step: 1, value: 6 },
         { key: 'rain', label: '雨（滴 / 秒）', type: 'range', min: 0, max: 20, step: 1, value: 1 },
         {
+            key: 'background', label: '背景', type: 'select', value: 'tiles',
+            options: [
+                { value: 'tiles', label: 'タイル' },
+                { value: 'cameraBack', label: 'カメラ（背面）' },
+                { value: 'cameraFront', label: 'カメラ（前面）' },
+            ],
+        },
+        {
             key: 'view', label: '表示', type: 'select', value: 'water',
             options: [{ value: 'water', label: '水面（屈折＋光）' }, { value: 'height', label: '高さマップ' }],
         },
     ],
-    create(canvas, ctx, params) {
-        return new Ripple(canvas, ctx, params);
+    create(canvas, ctx, params, host) {
+        return new Ripple(canvas, ctx, params, host);
     },
 };
 
 class Ripple {
-    constructor(canvas, ctx, params) {
+    constructor(canvas, ctx, params, host) {
         this.canvas = canvas;
         this.ctx = ctx;
         this.p = params;
+        this.host = host;
         this.cols = 0;
         this.rows = 0;
         this.scale = params.resolution / BASE_COLS;
         this.cur = null;     // 現在の高さ
         this.prev = null;    // 1 ステップ前の高さ（更新時に次の高さで上書きして入れ替える）
-        this.bg = null;      // 底の模様（RGB）
+        this.bg = null;      // 底のタイル模様（RGBA）
+        this.camBg = null;   // カメラ映像に水の色を混ぜたもの（RGBA）
+        this.camera = null;
+        this.cameraToken = 0;
         this.off = document.createElement('canvas');
         this.offCtx = this.off.getContext('2d');
         this.img = null;
         this.stepAcc = 0;
         this.rainAcc = 0;
+        this.applyBackground();
+    }
+
+    // 背景の設定に合わせてカメラを起動・停止する
+    async applyBackground() {
+        const token = ++this.cameraToken;
+        const facing = FACING[this.p.background];
+        if (!facing) {
+            this.camera?.stop();
+            return;
+        }
+        this.camera ??= new Camera();
+        this.host.showMessage('');
+        try {
+            // 待っている間に設定が変わった場合、古い起動は camera 側で破棄される
+            await this.camera.start(facing);
+        } catch (err) {
+            if (token !== this.cameraToken) return;
+            this.host.showMessage(err.message + '。背景をタイルに戻しました。');
+            this.p.background = 'tiles';
+            this.host.setParam('background', 'tiles');
+        }
     }
 
     resize(width, height) {
@@ -86,10 +126,28 @@ class Ripple {
         this.off.height = rows;
         this.img = this.offCtx.createImageData(cols, rows);
         this.bg = makeTiles(cols, rows, this.scale);
+        this.camBg = new Uint8ClampedArray(cols * rows * 4);
     }
 
     onParam(key, value) {
         this.p[key] = value;
+        if (key === 'background') this.applyBackground();
+    }
+
+    // カメラ映像が使えればそれを、まだなら（起動中など）タイル模様を返す
+    background() {
+        if (!this.camera?.ready || !FACING[this.p.background]) return this.bg;
+        const src = this.camera.sample(this.cols, this.rows);
+        if (!src) return this.bg;
+        const dst = this.camBg;
+        const k = 1 - TINT_AMOUNT;
+        const [tr, tg, tb] = WATER_TINT.map((v) => v * TINT_AMOUNT);
+        for (let i = 0; i < dst.length; i += 4) {
+            dst[i] = src[i] * k + tr;
+            dst[i + 1] = src[i + 1] * k + tg;
+            dst[i + 2] = src[i + 2] * k + tb;
+        }
+        return dst;
     }
 
     // 位置 (x, y)（マス単位）に、なめらかなくぼみを加える
@@ -167,7 +225,8 @@ class Ripple {
     }
 
     renderWater() {
-        const { cols, rows, cur, bg, scale } = this;
+        const { cols, rows, cur, scale } = this;
+        const bg = this.background();
         const out = this.img.data;
         const refr = REFRACTION * scale;
         const maxX = cols - 1.001, maxY = rows - 1.001;   // 補間で右下の隣を読むため、端の 1 マス手前まで
@@ -189,8 +248,8 @@ class Ripple {
                 sy = sy < 0 ? 0 : sy > maxY ? maxY : sy;
                 const ix = sx | 0, iy = sy | 0;
                 const tx = sx - ix, ty = sy - iy;
-                const b00 = (iy * cols + ix) * 3, b10 = b00 + 3;
-                const b01 = b00 + cols * 3, b11 = b01 + 3;
+                const b00 = (iy * cols + ix) * 4, b10 = b00 + 4;
+                const b01 = b00 + cols * 4, b11 = b01 + 4;
                 const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
 
                 // 水面の法線から、明るさとハイライトを求める
@@ -233,13 +292,15 @@ class Ripple {
     }
 
     dispose() {
-        this.cur = this.prev = this.bg = this.img = null;
+        this.cameraToken++;
+        this.camera?.stop();
+        this.cur = this.prev = this.bg = this.camBg = this.img = null;
     }
 }
 
-// プールの底のタイル模様（RGB, 1 マス 3 バイト）
+// プールの底のタイル模様（RGBA, 1 マス 4 バイト。カメラ映像と同じ並び）
 function makeTiles(cols, rows, scale) {
-    const bg = new Uint8ClampedArray(cols * rows * 3);
+    const bg = new Uint8ClampedArray(cols * rows * 4);
     const tile = Math.max(6, Math.round(22 * scale));
     const grout = Math.max(1, Math.round(tile * 0.08));
     const cx = cols / 2, cy = rows / 2;
@@ -253,7 +314,7 @@ function makeTiles(cols, rows, scale) {
             const jitter = (h - Math.floor(h) - 0.5) * 14;
             // 周辺を少し暗くして奥行きを出す
             const vignette = 1 - 0.35 * (Math.hypot(x - cx, y - cy) / maxD) ** 2;
-            const o = (y * cols + x) * 3;
+            const o = (y * cols + x) * 4;
             if (onGrout) {
                 bg[o] = 150 * vignette;
                 bg[o + 1] = 205 * vignette;
