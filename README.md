@@ -10,7 +10,7 @@ GitHub Pages で公開している、制作物・実験用ページの置き場�
 | [`page_opencvjs_demo.html`](page_opencvjs_demo.html) | OpenCV.js によるカメラ映像のリアルタイム画像処理（オリジナル / カートゥーン / グレースケール / 2値化 / Canny エッジ抽出） |
 | [`page_text_processer.html`](page_text_processer.html) | テキスト加工ツール（文字数・行数カウント、連番付与、行ソート、置換、行頭・行末への付与、改行⇔文字列変換） |
 | [`page_sensor_viewer.html`](page_sensor_viewer.html) | スマホのセンサー情報ビューア（傾き・方位・加速度・ジャイロ・位置情報・マイク音量・タッチ・端末情報・バイブ） |
-| [`page_fluid.html`](page_fluid.html) | 液体シミュレーション（① 波紋。案を切り替えて表示。本体は `fluid/` 以下） |
+| [`page_fluid.html`](page_fluid.html) | 液体シミュレーション（① 波紋 / ④ PBF。案を切り替えて表示。本体は `fluid/` 以下） |
 | `opencv.js` | OpenCV.js 本体（CDN ではなく同梱して読み込み） |
 
 ## ローカルでの確認
@@ -46,6 +46,10 @@ python3 -m http.server 8000
 | `fluid/camera.js` | カメラ映像を格子サイズの RGBA として取り出す（背面 / 前面、前面は左右反転） |
 | `fluid/sims/registry.js` | シミュレーションの一覧 |
 | `fluid/sims/ripple.js` | ① 波紋（2 次元の波動方程式）。背景はタイル / カメラ映像 |
+| `fluid/sims/pbf.js` | ④ PBF の入力（傾き・指・シェイク）と描画 |
+| `fluid/sims/pbf-solver.js` | ④ PBF の計算本体（DOM に依存しないので Node.js でも動く） |
+| `fluid/sims/shared/grid.js` | 一様格子による近傍探索（粒子法で共用） |
+| `fluid/sims/shared/kernels.js` | 2 次元の SPH カーネル関数（粒子法で共用） |
 
 新しいシミュレーションを追加するには:
 
